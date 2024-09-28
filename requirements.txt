@@ -1,0 +1,6 @@
+ipykernel
+pyright
+ruff
+polars
+matplotlib
+pyyaml
