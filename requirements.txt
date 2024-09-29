@@ -1,6 +1,9 @@
+# dev
 ipykernel
 pyright
 ruff
+# processing
 polars
-matplotlib
-pyyaml
+# plot
+altair
+vl-convert-python
