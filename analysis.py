@@ -127,7 +127,7 @@ def plot_answers(
     chart = alt.Chart(answers, height=alt.Step(40))
     question = deepcopy(question)
     question_type: "QuestionTypes" = question["type"]
-    question_prompt = question["prompt"]
+    question_prompt = strip_prompt(question["prompt"])
     question_allow_other = question.get("allow_other", False)
     question_keep_choice_order = question.get("keep_choice_order", False)
     question_choices = get_actual_choices(
@@ -237,7 +237,7 @@ def process_question(
 # helpful to debug
 process_question(
     survey=survey,
-    i_question=17,
+    i_question=11,
     output_path=OUTPUT_PATH,
 )
 
