@@ -1,13 +1,14 @@
 # %%
-from copy import deepcopy
 import json
-from pathlib import Path
 import re
-from typing import Literal
+import traceback
 import typing
+from copy import deepcopy
+from pathlib import Path
+from typing import Literal
 
-import polars as pl
 import altair as alt
+import polars as pl
 
 with open("data/survey.json") as f:
     survey = json.load(f)
@@ -16,23 +17,44 @@ df = pl.read_csv("data/results-survey2024.csv").filter(
     pl.col("submitdate. Date submitted") != ""
 )
 
+OUTPUT_PATH = Path("output/")
+
 
 # %%
 NOT_ANSWERED = "Not answered"
 OTHER = "Other"
 
+
+def get_actual_choices(
+    choices: list[str],
+    allow_other: bool,
+) -> list[str]:
+    choices = deepcopy(choices)
+    choices += [NOT_ANSWERED]
+    if allow_other:
+        choices += [OTHER]
+    return choices
+
+
 if typing.TYPE_CHECKING:
-    QuestionTypes = Literal["single"] | Literal["multiple"] | Literal["ranking"]
+    QuestionTypes = (
+        Literal["single"] | Literal["multiple"] | Literal["ranking"] | Literal["text"]
+    )
 
 
 def compute_stats(
     i_question: int,
-    question_type: "QuestionTypes",
-    question_allow_other: bool,
+    question: dict,
     df: pl.DataFrame,
 ) -> pl.DataFrame:
     df = df.__copy__()
-    question = deepcopy(survey["questions"][i_question])
+    question = deepcopy(question)
+    question_type: "QuestionTypes" = question["type"]
+    question_allow_other = question.get("allow_other", False)
+    question_choices = get_actual_choices(
+        question.get("choices", []),
+        allow_other=question_allow_other,
+    )
 
     answers: pl.DataFrame
     match question_type:
@@ -49,14 +71,11 @@ def compute_stats(
                 (pl.col("count") / pl.sum("count")).alias("percentage")
             )
             # check values are within designed choices
-            choices = question["choices"]
-            choices += [NOT_ANSWERED]
-            if question_allow_other:
-                choices += [OTHER]
             for v in answers["choices"].to_list():
-                assert v in choices, f"'{v}' not in choices: {', '.join(choices)}"
+                assert (
+                    v in question_choices
+                ), f"'{v}' not in choices: {', '.join(question_choices)}"
         case "multiple":
-            choices = question["choices"]
             choice_columns = [
                 c for c in df.columns if c.startswith(f"q{i_question+1:02d}[")
             ]
@@ -73,9 +92,9 @@ def compute_stats(
                 .rename({"variable": "choices"})
                 .unpivot(index=["choices"])
                 .rename({"value": "count"})
+                .fill_null(0)
             )
         case "ranking":
-            choices = question["choices"]
             choice_columns = [
                 c for c in df.columns if c.startswith(f"q{i_question+1:02d}[")
             ]
@@ -96,24 +115,38 @@ def compute_stats(
                 )
             )
         case _:
-            raise NotImplementedError(question_type)
+            raise ValueError(f"Not implemented for question type {question_type}")
 
     return answers
 
 
 def plot_answers(
-    question_type: "QuestionTypes",
-    question_prompt: str,
+    question: dict,
     answers: pl.DataFrame,
 ) -> alt.Chart | alt.LayerChart | alt.FacetChart:
     chart = alt.Chart(answers, height=alt.Step(40))
+    question = deepcopy(question)
+    question_type: "QuestionTypes" = question["type"]
+    question_prompt = question["prompt"]
+    question_allow_other = question.get("allow_other", False)
+    question_keep_choice_order = question.get("keep_choice_order", False)
+    question_choices = get_actual_choices(
+        question.get("choices", []),
+        allow_other=question_allow_other,
+    )
+
+    def y_sort(y):
+        if question_keep_choice_order:
+            return y.sort(question_choices)
+        else:
+            return y.sort("-x")
 
     bar_color: alt.Color
     row: alt.Row | None
     match question_type:
         case "single":
             chart = chart.encode(
-                y=alt.Y("choices").sort("-x").title("Choices"),
+                y=y_sort(alt.Y("choices")).title("Choices"),
                 x=alt.X("count").title("Count"),
                 text=alt.Text("percentage:Q", format=".1%"),
             )
@@ -124,21 +157,31 @@ def plot_answers(
                 chart.transform_joinaggregate(total="sum(count)", groupby=["choices"])
                 .transform_calculate(percent="datum.count / datum.total")
                 .encode(
-                    y=alt.Y("variable").sort("-x").title("Selected"),
+                    y=alt.Y("variable").sort(["Yes", "No"]).title(None),
                     x=alt.X("count").title("Count"),
                     text=alt.Text("percent:Q", format=".1%"),
                 )
             )
             bar_color = alt.Color("variable", legend=None, sort="-x")
+            facet_choice_order: list[str]
+            if question_keep_choice_order:
+                facet_choice_order = question_choices
+            else:
+                facet_choice_order = (
+                    answers.filter(pl.col("variable") == "Yes")
+                    .sort(by="count", descending=True)["choices"]
+                    .to_list()
+                )
             row = alt.Row(
                 "choices",
+                sort=facet_choice_order,
                 header=alt.Header(
                     labelAngle=0,
                     labelAlign="left",  # https://github.com/vega/vega/issues/2233
                 ),
             ).title("Choices")
-        case "ranking":
-            raise NotImplementedError
+        case _:
+            raise ValueError(f"Not implemented for question type {question_type}")
 
     chart = chart.encode(color=bar_color).mark_bar(size=25) + chart.mark_text(
         baseline="middle",
@@ -152,25 +195,6 @@ def plot_answers(
     return chart
 
 
-# i_question = 5
-# question_type = survey["questions"][i_question]["type"]
-# question_prompt = survey["questions"][i_question]["prompt"]
-# question_allow_other = survey["questions"][i_question].get("allow_other", False)
-# answers = compute_stats(
-#     i_question=i_question,
-#     question_type=question_type,
-#     question_allow_other=question_allow_other,
-#     df=df,
-# )
-# plot = plot_answers(
-#     question_type=question_type,
-#     question_prompt=question_prompt,
-#     answers=answers,
-# )
-# plot
-
-
-# %%
 def strip_prompt(prompt: str):
     m = re.match(r"(.+\?)", prompt)
     if m is not None:
@@ -184,22 +208,14 @@ def process_question(
     i_question: int,
     output_path: Path,
 ):
-    question = survey["questions"][i_question]
-    question_prompt: str = strip_prompt(question["prompt"])
-    question_type = question["type"]
-    if question_type == "text":
-        print(f"Skip text question {i_question} ({question_prompt})")
-        return
-    question_allow_other = question.get("allow_other", False)
+    question = deepcopy(survey["questions"][i_question])
     answers = compute_stats(
         i_question=i_question,
-        question_type=question_type,
-        question_allow_other=question_allow_other,
+        question=question,
         df=df,
     )
     chart = plot_answers(
-        question_type=question_type,
-        question_prompt=question_prompt,
+        question=question,
         answers=answers,
     )
 
@@ -218,7 +234,15 @@ def process_question(
         chart.save(fp=f, format="json")
 
 
-OUTPUT_PATH = Path("output/")
+# helpful to debug
+process_question(
+    survey=survey,
+    i_question=17,
+    output_path=OUTPUT_PATH,
+)
+
+# %%
+# RUN ALL
 for i_question in range(len(survey["questions"])):
     try:
         process_question(
@@ -228,10 +252,6 @@ for i_question in range(len(survey["questions"])):
         )
     except Exception:
         print("Failed", i_question)
+        print(traceback.format_exc())
 
 # %%
-# process_question(
-#     survey=survey,
-#     i_question=22,
-#     output_path=OUTPUT_PATH,
-# )
