@@ -92,7 +92,12 @@ def compute_stats(
                 .rename({"variable": "choices"})
                 .unpivot(index=["choices"])
                 .rename({"value": "count"})
-                .fill_null(0)
+                .with_columns(pl.col("count").fill_null(0))
+                .with_columns(
+                    pl.col("variable")
+                    .replace("Yes", "Selected")
+                    .replace("No", "Not selected")
+                )
             )
         case "ranking":
             choice_columns = [
@@ -157,7 +162,7 @@ def plot_answers(
                 chart.transform_joinaggregate(total="sum(count)", groupby=["choices"])
                 .transform_calculate(percent="datum.count / datum.total")
                 .encode(
-                    y=alt.Y("variable").sort(["Yes", "No"]).title(None),
+                    y=alt.Y("variable").sort(["Selected", "Not selected"]).title(None),
                     x=alt.X("count").title("Count"),
                     text=alt.Text("percent:Q", format=".1%"),
                 )
@@ -168,7 +173,7 @@ def plot_answers(
                 facet_choice_order = question_choices
             else:
                 facet_choice_order = (
-                    answers.filter(pl.col("variable") == "Yes")
+                    answers.filter(pl.col("variable") == "Selected")
                     .sort(by="count", descending=True)["choices"]
                     .to_list()
                 )
