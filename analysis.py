@@ -63,15 +63,15 @@ def compute_stats(
                 c for c in df.columns if c.startswith(f"q{i_question+1:02d}.")
             ]
             assert len(choice_columns) == 1
-            df = df.rename({choice_columns[0]: "choices"})
-            s = df["choices"]
+            df = df.rename({choice_columns[0]: "choice"})
+            s = df["choice"]
             s = s.set(s.str.len_chars() == 0, NOT_ANSWERED)
             answers = s.value_counts()
             answers = answers.with_columns(
                 (pl.col("count") / pl.sum("count")).alias("percentage")
             )
             # check values are within designed choices
-            for v in answers["choices"].to_list():
+            for v in answers["choice"].to_list():
                 assert (
                     v in question_choices
                 ), f"'{v}' not in choices: {', '.join(question_choices)}"
@@ -89,8 +89,8 @@ def compute_stats(
                     aggregate_function="len",
                 )
                 .with_columns(pl.col("variable").str.extract(r".*\[(.+)\]"))
-                .rename({"variable": "choices"})
-                .unpivot(index=["choices"])
+                .rename({"variable": "choice"})
+                .unpivot(index=["choice"])
                 .rename({"value": "count"})
                 .with_columns(pl.col("count").fill_null(0))
                 .with_columns(
@@ -99,6 +99,17 @@ def compute_stats(
                     .replace("No", "Not selected")
                 )
             )
+            answers = answers.join(
+                answers.group_by("choice").agg(pl.sum("count").alias("total")),
+                on=["choice"],
+            )
+            answers = answers.join(
+                answers.filter(pl.col("variable") == "Selected").select(
+                    "choice", pl.col("count").alias("by_choice_is_selected_count")
+                ),
+                on=["choice"],
+            )
+            answers = answers.with_columns(percentage=pl.col("count") / pl.col("total"))
         case "ranking":
             choice_columns = [
                 c for c in df.columns if c.startswith(f"q{i_question+1:02d}[")
@@ -129,7 +140,6 @@ def plot_answers(
     question: dict,
     answers: pl.DataFrame,
 ) -> alt.Chart | alt.LayerChart | alt.FacetChart:
-    chart = alt.Chart(answers, height=alt.Step(40))
     question = deepcopy(question)
     question_type: "QuestionTypes" = question["type"]
     question_prompt = strip_prompt(question["prompt"])
@@ -146,45 +156,35 @@ def plot_answers(
         else:
             return y.sort("-x")
 
+    chart = alt.Chart(answers, height=alt.Step(40))
     bar_color: alt.Color
     row: alt.Row | None
     match question_type:
         case "single":
             chart = chart.encode(
-                y=y_sort(alt.Y("choices")).title("Choices"),
+                y=y_sort(alt.Y("choice")).title("Choice"),
                 x=alt.X("count").title("Count"),
                 text=alt.Text("percentage:Q", format=".1%"),
             )
-            bar_color = alt.Color("choices", legend=None, sort="-x")
+            bar_color = alt.Color("choice", legend=None, sort="-x")
             row = None
         case "multiple":
-            chart = (
-                chart.transform_joinaggregate(total="sum(count)", groupby=["choices"])
-                .transform_calculate(percent="datum.count / datum.total")
-                .encode(
-                    y=alt.Y("variable").sort(["Selected", "Not selected"]).title(None),
-                    x=alt.X("count").title("Count"),
-                    text=alt.Text("percent:Q", format=".1%"),
+            chart = chart.transform_calculate(
+                percent="datum.count / datum.total"
+            ).encode(
+                y=alt.Y("choice:N")
+                .sort(
+                    alt.SortField("by_choice_is_selected_count", order="descending"),
+                    op="max",
                 )
+                .title(None),
+                x=alt.X("sum(count):Q").stack("zero").title("Count"),
+                detail=alt.Detail("variable:N"),
+                order=alt.Order("variable", sort="descending"),
+                text=alt.Text("sum(percentage):Q", format=".1%"),
             )
-            bar_color = alt.Color("variable", legend=None, sort="-x")
-            facet_choice_order: list[str]
-            if question_keep_choice_order:
-                facet_choice_order = question_choices
-            else:
-                facet_choice_order = (
-                    answers.filter(pl.col("variable") == "Selected")
-                    .sort(by="count", descending=True)["choices"]
-                    .to_list()
-                )
-            row = alt.Row(
-                "choices",
-                sort=facet_choice_order,
-                header=alt.Header(
-                    labelAngle=0,
-                    labelAlign="left",  # https://github.com/vega/vega/issues/2233
-                ),
-            ).title("Choices")
+            bar_color = alt.Color("variable:N").title("")
+            row = None
         case _:
             raise ValueError(f"Not implemented for question type {question_type}")
 
@@ -239,12 +239,12 @@ def process_question(
         chart.save(fp=f, format="json")
 
 
-# helpful to debug
-process_question(
-    survey=survey,
-    i_question=11,
-    output_path=OUTPUT_PATH,
-)
+# # helpful to debug
+# process_question(
+#     survey=survey,
+#     i_question=11,
+#     output_path=OUTPUT_PATH,
+# )
 
 # %%
 # RUN ALL
