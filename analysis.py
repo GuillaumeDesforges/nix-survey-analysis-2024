@@ -1,7 +1,6 @@
 # %%
 import json
 import re
-import traceback
 import typing
 from copy import deepcopy
 from pathlib import Path
@@ -139,9 +138,18 @@ def compute_stats(
                 .with_columns(
                     rank_in_rank=pl.col("count").rank(descending=True).over("variable")
                 )
+                .with_columns(
+                    choice=pl.when(pl.col("rank_in_rank") <= 10)
+                    .then(pl.col("choice"))
+                    .otherwise(pl.lit("Other"))
+                )
+                .group_by([pl.col("choice"), pl.col("variable")])
+                .agg(count=pl.sum("count"))
             )
         case _:
-            raise ValueError(f"Not implemented for question type {question_type}")
+            raise NotImplementedError(
+                f"Not implemented for question type {question_type}"
+            )
 
     return answers
 
@@ -170,6 +178,7 @@ def plot_answers(
     bar_color: alt.Color
     row: alt.Row | None
     bar_text_within = False
+    chart_title = question_prompt
     match question_type:
         case "single":
             chart = chart.encode(
@@ -202,27 +211,31 @@ def plot_answers(
                 x=alt.X("sum(count):Q").stack("zero").title("Count"),
                 detail=alt.Detail("choice:N"),
                 order=alt.Order("count:N", sort="descending"),
-                # text=alt.Text("choice[0]:N"),
-            ).transform_filter("datum.rank_in_rank <= 5")
+                text=alt.Text("choice[0]:N"),
+            )
 
-            bar_color = alt.Color("choice:N", sort="ascending").title("")
+            bar_color = alt.Color("choice:N", sort="ascending").title("Choice")
             row = None
             bar_text_within = True
+            chart_title += " (top 5 ranks, top 10 choices per rank)"
         case _:
-            raise ValueError(
+            raise NotImplementedError(
                 f"Not implemented for question type {question_type}: {question_prompt}"
             )
 
-    bar_text_align, bar_text_dx = ("right", -5) if bar_text_within else ("left", 5)
+    bar_text_align, bar_text_dx, bat_text_color = (
+        ("right", 0, "white") if bar_text_within else ("left", 5, "black")
+    )
     chart = chart.encode(color=bar_color).mark_bar(size=25) + chart.mark_text(
         baseline="middle",
         align=bar_text_align,
         dx=bar_text_dx,
         size=10,
+        color=bat_text_color,
     )
     if row:
         chart = chart.facet(row=row)
-    chart = chart.properties(title=question_prompt).configure_title(anchor="middle")
+    chart = chart.properties(title=chart_title).configure_title(anchor="middle")
     return chart
 
 
@@ -291,8 +304,7 @@ for i_question in range(len(survey["questions"])):
             i_question=i_question,
             output_path=OUTPUT_PATH,
         )
-    except Exception:
-        print("Failed", i_question)
-        print(traceback.format_exc())
+    except NotImplementedError as e:
+        print(f"i_question={i_question:02} error={e}")
 
 # %%
