@@ -118,16 +118,26 @@ def compute_stats(
                 df[choice_columns]
                 .unpivot()
                 .pivot(
-                    "variable", values="value", index="value", aggregate_function="len"
+                    "variable",
+                    values="value",
+                    index="value",
+                    aggregate_function="len",
                 )
                 .fill_null(0)
+                .rename({"value": "choice"})
+                .filter(pl.col("choice") != "")
                 .rename(
                     {
-                        c: m.group(1)
+                        c: f"Rank {int(m.group(2)):02}"
                         if (m := re.match(r".*(Rank (\d+))", c)) is not None
                         else ""
                         for c in choice_columns
                     }
+                )
+                .select("choice", *(f"Rank {i+1:02}" for i in range(5)))
+                .unpivot(index="choice", value_name="count")
+                .with_columns(
+                    rank_in_rank=pl.col("count").rank(descending=True).over("variable")
                 )
             )
         case _:
@@ -159,6 +169,7 @@ def plot_answers(
     chart = alt.Chart(answers, height=alt.Step(40))
     bar_color: alt.Color
     row: alt.Row | None
+    bar_text_within = False
     match question_type:
         case "single":
             chart = chart.encode(
@@ -185,13 +196,28 @@ def plot_answers(
             )
             bar_color = alt.Color("variable:N").title("")
             row = None
-        case _:
-            raise ValueError(f"Not implemented for question type {question_type}")
+        case "ranking":
+            chart = chart.encode(
+                y=alt.Y("variable:N").title(None),
+                x=alt.X("sum(count):Q").stack("zero").title("Count"),
+                detail=alt.Detail("choice:N"),
+                order=alt.Order("count:N", sort="descending"),
+                # text=alt.Text("choice[0]:N"),
+            ).transform_filter("datum.rank_in_rank <= 5")
 
+            bar_color = alt.Color("choice:N", sort="ascending").title("")
+            row = None
+            bar_text_within = True
+        case _:
+            raise ValueError(
+                f"Not implemented for question type {question_type}: {question_prompt}"
+            )
+
+    bar_text_align, bar_text_dx = ("right", -5) if bar_text_within else ("left", 5)
     chart = chart.encode(color=bar_color).mark_bar(size=25) + chart.mark_text(
         baseline="middle",
-        align="left",
-        dx=5,
+        align=bar_text_align,
+        dx=bar_text_dx,
         size=10,
     )
     if row:
@@ -242,8 +268,18 @@ def process_question(
 # # helpful to debug
 # process_question(
 #     survey=survey,
-#     i_question=11,
+#     i_question=22,
 #     output_path=OUTPUT_PATH,
+# )
+# question = deepcopy(survey["questions"][22])
+# answers = compute_stats(
+#     i_question=22,
+#     question=question,
+#     df=df,
+# )
+# plot_answers(
+#     question=question,
+#     answers=answers,
 # )
 
 # %%
