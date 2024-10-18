@@ -116,33 +116,30 @@ def save_output(
 
 
 # +
-q08_q07sq003 = (
-    df.select("q07[SQ003]", "q08")
-    .pivot("q07[SQ003]", index="q08", values="q08", aggregate_function="len")
-    .unpivot(
-        on=["Yes", "No"],
-        index="q08",
-        variable_name="q07SQ003",
-        value_name="count",
-    )
-)
+q08_q07sq003 = df.group_by("q07[SQ003]", "q08").agg(pl.count())
 display(q08_q07sq003)
 
 """
-Now the question is: does the proportion of NixOS usage evolve through 
+Now the question is: does the proportion of NixOS usage evolve through the years?
 """
 
 chart_q08_q07sq003 = (
-    q08_q07sq003.filter(pl.col("q07SQ003") == "Yes")
-    .select("q08", pl.col("count").alias("count_yes"))
-    .join(
-        q08_q07sq003.group_by("q08").agg(pl.col("count").sum().alias("count_total")),
-        on="q08",
+    alt.Chart(
+        q08_q07sq003.filter(pl.col("q07[SQ003]") == "Yes")
+        .select("q08", pl.col("count").alias("count_yes"))
+        .join(
+            q08_q07sq003.group_by("q08").agg(
+                pl.col("count").sum().alias("count_total")
+            ),
+            on="q08",
+        )
+        .select(
+            "q08",
+            (pl.col("count_yes") / pl.col("count_total") * 100).alias("percent_yes"),
+        )
     )
-    .select(
-        "q08", (pl.col("count_yes") / pl.col("count_total") * 100).alias("percent_yes")
-    )
-    .plot.bar(
+    .mark_bar()
+    .encode(
         x=alt.X("q08", title=get_question_prompt("q08")).sort(
             (get_question("q08") or {}).get("choices")
         ),
@@ -156,23 +153,20 @@ save_output(code="q08_q07sq003", table=q08_q07sq003, chart=chart_q08_q07sq003)
 
 
 # %%
-q08_q09 = (
-    df.select("q09", "q08")
-    .pivot("q09", index="q08", values="q08", aggregate_function="len")
-    .unpivot(
-        index="q08",
-        variable_name="q09",
-        value_name="count",
-    )
-)
+q08_q09 = df.group_by("q09", "q08").agg(pl.count())
 display(q08_q09)
 
 """
-Now the question is: does the proportion of NixOS usage evolve through 
+Now the question is: does the self-evaluated skill level with Nix evolve through the years?
 """
 
 chart_q08_q09 = (
-    alt.Chart(q08_q09)
+    alt.Chart(
+        q08_q09,
+        title="Percentage of self-evaluated skill level with Nix, normalized by years of Nix experience",
+    )
+    .transform_joinaggregate(total="sum(count)", groupby=["q08"])
+    .transform_calculate(frac=alt.datum.count / alt.datum.total * 100)
     .mark_rect()
     .encode(
         x=alt.X("q08", title=get_question_prompt("q08")).sort(
@@ -181,10 +175,122 @@ chart_q08_q09 = (
         y=alt.Y("q09", title=get_question_prompt("q09")).sort(
             (get_question("q09") or {}).get("choices")
         ),
-        color=alt.Color("count"),
+        color=alt.Color("frac:Q", scale=alt.Scale(domain=[0, 100]), title="Percentage"),
     )
 )
 
 display(chart_q08_q09)
 
 save_output(code="q08_q09", table=q08_q09, chart=chart_q08_q09)
+
+# %%
+q08_q11 = df.group_by("q11", "q08").agg(pl.count())
+display(q08_q11)
+
+chart_q08_q11 = (
+    alt.Chart(
+        q08_q11,
+        title="Percentage of medium from which people discovered Nix, normalized by years of Nix experience",
+    )
+    .transform_joinaggregate(total="sum(count)", groupby=["q08"])
+    .transform_calculate(frac=alt.datum.count / alt.datum.total * 100)
+    .mark_rect()
+    .encode(
+        x=alt.X("q08", title=get_question_prompt("q08")).sort(
+            (get_question("q08") or {}).get("choices")
+        ),
+        y=alt.Y("q11", title=get_question_prompt("q11")).sort(
+            (get_question("q11") or {}).get("choices")
+        ),
+        color=alt.Color("frac:Q"),
+    )
+)
+
+display(chart_q08_q11)
+
+save_output(code="q08_q11", table=q08_q11, chart=chart_q08_q11)
+
+
+# %%
+def reduce_join(dfs: list[pl.DataFrame], on: str | list[str]) -> pl.DataFrame:
+    result = dfs[0]
+    for df in dfs[1:]:
+        result = result.join(df, on=on, how="left")
+    return result
+
+
+q14_choices = (get_question("q14") or {})["choices"]
+q14_choices_cols = [f"q14[SQ{i+1:03}]" for i in range(len(q14_choices))]
+q08_q14 = df.group_by("q08", *q14_choices_cols).agg(pl.count())
+q08_q14 = reduce_join(
+    [
+        q08_q14.filter(pl.col(col) == "Yes")
+        .group_by("q08")
+        .agg(pl.sum("count").alias(choice))
+        for choice, col in zip(q14_choices, q14_choices_cols)
+    ],
+    on="q08",
+).unpivot(index="q08", value_name="count")
+display(q08_q14)
+
+chart_q08_q14 = (
+    alt.Chart(
+        q08_q14,
+        title="Count of usage of Nix installer normalized by years of Nix experience",
+    )
+    .transform_joinaggregate(total="sum(count)", groupby=["q08"])
+    .transform_calculate(frac=alt.datum.count / alt.datum.total)
+    .encode(
+        x=alt.X("q08", title=get_question_prompt("q08")).sort(
+            (get_question("q08") or {}).get("choices")
+        ),
+        y=alt.Y("variable", title=get_question_prompt("q14")),
+        text=alt.Text("frac:Q", format=".0%"),
+    )
+)
+chart_q08_q14 = chart_q08_q14.encode(
+    color=alt.Color("frac:Q", title="Percentage", scale=alt.Scale(domain=[0, 1]))
+).mark_rect() + chart_q08_q14.mark_text(size=5, color="black")
+
+display(chart_q08_q14)
+
+save_output(code="q08_q14", table=q08_q14, chart=chart_q08_q14)
+
+
+# %%
+q18_choices = (get_question("q18") or {})["choices"]
+q18_choices_cols = [f"q18[SQ{i+1:03}]" for i in range(len(q18_choices))]
+q08_q18 = df.group_by("q08", *q18_choices_cols).agg(pl.count())
+q08_q18 = reduce_join(
+    [
+        q08_q18.filter(pl.col(col) == "Yes")
+        .group_by("q08")
+        .agg(pl.sum("count").alias(choice))
+        for choice, col in zip(q18_choices, q18_choices_cols)
+    ],
+    on="q08",
+).unpivot(index="q08", value_name="count")
+display(q08_q18)
+
+chart_q08_q18 = (
+    alt.Chart(
+        q08_q18,
+        title="Count of usage of Nix installer normalized by years of Nix experience",
+    )
+    .transform_joinaggregate(total="sum(count)", groupby=["q08"])
+    .transform_calculate(frac=alt.datum.count / alt.datum.total)
+    .encode(
+        x=alt.X("q08", title=get_question_prompt("q08")).sort(
+            (get_question("q08") or {}).get("choices")
+        ),
+        y=alt.Y("variable", title=get_question_prompt("q18")),
+        text=alt.Text("frac:Q", format=".0%"),
+    )
+)
+chart_q08_q18 = chart_q08_q18.encode(
+    color=alt.Color("frac:Q", title="Percentage", scale=alt.Scale(domain=[0, 1]))
+).mark_rect() + chart_q08_q18.mark_text(size=5, color="black")
+
+display(chart_q08_q18)
+
+save_output(code="q08_q18", table=q08_q18, chart=chart_q08_q18)
