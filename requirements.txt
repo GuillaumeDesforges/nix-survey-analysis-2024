@@ -1,5 +1,6 @@
 # dev
 ipykernel
+ipython
 pyright
 ruff
 # processing
