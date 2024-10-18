@@ -3,7 +3,7 @@
   "intro": "Welcome to this year's Nix Community Survey! Please take 5-10 minutes to fill out this survey with info about yourself and how you use projects in the Nix ecosystem. Your responses will help us develop Nix, Nixpkgs, and NixOS to better match your needs and come up with new ideas for serving and growing the community. Please note that when we only say \"Nix\" in a question, we refer to the Nix command-line tool. When we want to refer to the Nix language, Nixpkgs, NixOS, or the Nix ecosystem as a whole, we'll be clear with the terms.\n",
   "questions": [
     {
-      "id": "q1",
+      "id": "q01",
       "prompt": "Where do you live?",
       "type": "single",
       "choices": [
@@ -26,7 +26,7 @@
       ]
     },
     {
-      "id": "q2",
+      "id": "q02",
       "prompt": "What is your age?",
       "type": "single",
       "keep_choice_order": true,
@@ -42,7 +42,7 @@
       ]
     },
     {
-      "id": "q3",
+      "id": "q03",
       "prompt": "How do you identify?",
       "type": "single",
       "allow_other": true,
@@ -54,7 +54,7 @@
       ]
     },
     {
-      "id": "q4",
+      "id": "q04",
       "prompt": "Including any education, how many years have you been programming in total?",
       "type": "single",
       "keep_choice_order": true,
@@ -70,7 +70,7 @@
       ]
     },
     {
-      "id": "q5",
+      "id": "q05",
       "prompt": "Which of the following describes your main occupation?",
       "type": "single",
       "allow_other": true,
@@ -110,7 +110,7 @@
       ]
     },
     {
-      "id": "q6",
+      "id": "q06",
       "prompt": "Which operating systems do you currently use?",
       "type": "multiple",
       "choices": [
@@ -123,7 +123,7 @@
       ]
     },
     {
-      "id": "q7",
+      "id": "q07",
       "prompt": "Which of these best describe your involvement with the Nix ecosystem?",
       "type": "multiple",
       "keep_choice_order": true,
@@ -141,7 +141,7 @@
       ]
     },
     {
-      "id": "q8",
+      "id": "q08",
       "prompt": "For how many years have you been using Nix in total?",
       "type": "single",
       "keep_choice_order": true,
@@ -156,7 +156,7 @@
       ]
     },
     {
-      "id": "q9",
+      "id": "q09",
       "prompt": "How would you describe your skill level with Nix?",
       "type": "single",
       "keep_choice_order": true,
