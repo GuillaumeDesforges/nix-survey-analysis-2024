@@ -265,15 +265,15 @@ def process_question(
 
     output_path.mkdir(parents=True, exist_ok=True)
 
-    answers_path = output_path / f"answers_{i_question:02}.json"
+    answers_path = output_path / f"answers_q{i_question+1:02}.json"
     with open(answers_path, "w") as f:
         json.dump(obj=answers.to_dicts(), fp=f)
 
-    chart_plot_path = output_path / f"chart_plot_{i_question:02}.png"
+    chart_plot_path = output_path / f"chart_plot_q{i_question+1:02}.png"
     with open(chart_plot_path, "wb") as f:
         chart.save(fp=f, format="png", scale_factor=3)
 
-    chart_json_path = output_path / f"chart_json_{i_question:02}.json"
+    chart_json_path = output_path / f"chart_json_q{i_question+1:02}.json"
     with open(chart_json_path, "w") as f:
         chart.save(fp=f, format="json")
 
