@@ -116,7 +116,7 @@ def save_output(
 
 
 # +
-q08_q07sq003 = df.group_by("q07[SQ003]", "q08").agg(pl.count())
+q08_q07sq003 = df.group_by("q07[SQ003]", "q08").agg(pl.len().alias("count"))
 display(q08_q07sq003)
 
 """
@@ -153,7 +153,7 @@ save_output(code="q08_q07sq003", table=q08_q07sq003, chart=chart_q08_q07sq003)
 
 
 # %%
-q08_q09 = df.group_by("q09", "q08").agg(pl.count())
+q08_q09 = df.group_by("q09", "q08").agg(pl.len().alias("count"))
 display(q08_q09)
 
 """
@@ -184,7 +184,7 @@ display(chart_q08_q09)
 save_output(code="q08_q09", table=q08_q09, chart=chart_q08_q09)
 
 # %%
-q08_q11 = df.group_by("q11", "q08").agg(pl.count())
+q08_q11 = df.group_by("q11", "q08").agg(pl.len().alias("count"))
 display(q08_q11)
 
 chart_q08_q11 = (
@@ -221,7 +221,7 @@ def reduce_join(dfs: list[pl.DataFrame], on: str | list[str]) -> pl.DataFrame:
 
 q14_choices = (get_question("q14") or {})["choices"]
 q14_choices_cols = [f"q14[SQ{i+1:03}]" for i in range(len(q14_choices))]
-q08_q14 = df.group_by("q08", *q14_choices_cols).agg(pl.count())
+q08_q14 = df.group_by("q08", *q14_choices_cols).agg(pl.len().alias("count"))
 q08_q14 = reduce_join(
     [
         q08_q14.filter(pl.col(col) == "Yes")
@@ -260,7 +260,7 @@ save_output(code="q08_q14", table=q08_q14, chart=chart_q08_q14)
 # %%
 q18_choices = (get_question("q18") or {})["choices"]
 q18_choices_cols = [f"q18[SQ{i+1:03}]" for i in range(len(q18_choices))]
-q08_q18 = df.group_by("q08", *q18_choices_cols).agg(pl.count())
+q08_q18 = df.group_by("q08", *q18_choices_cols).agg(pl.len().alias("count"))
 q08_q18 = reduce_join(
     [
         q08_q18.filter(pl.col(col) == "Yes")
