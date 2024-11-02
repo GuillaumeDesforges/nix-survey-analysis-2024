@@ -4,6 +4,7 @@ import re
 import typing
 from copy import deepcopy
 from pathlib import Path
+from textwrap import wrap
 from typing import Literal
 
 import altair as alt
@@ -15,6 +16,14 @@ with open("data/survey.json") as f:
 df = pl.read_csv("data/results-survey2024.csv").filter(
     pl.col("submitdate. Date submitted") != ""
 )
+
+with open("data/results-survey2024-text_answers.json") as f:
+    text_answers = {
+        question_id: [
+            {"choice": choice, "count": count} for choice, count in answers.items()
+        ]
+        for question_id, answers in json.load(f).items()
+    }
 
 OUTPUT_PATH = Path("output/")
 
@@ -42,12 +51,13 @@ if typing.TYPE_CHECKING:
 
 
 def compute_stats(
-    i_question: int,
     question: dict,
     df: pl.DataFrame,
+    text_answers: dict,
 ) -> pl.DataFrame:
     df = df.__copy__()
     question = deepcopy(question)
+    question_id = question["id"]
     question_type: "QuestionTypes" = question["type"]
     question_allow_other = question.get("allow_other", False)
     question_choices = get_actual_choices(
@@ -58,9 +68,7 @@ def compute_stats(
     answers: pl.DataFrame
     match question_type:
         case "single":
-            choice_columns = [
-                c for c in df.columns if c.startswith(f"q{i_question+1:02d}.")
-            ]
+            choice_columns = [c for c in df.columns if c.startswith(f"{question_id}.")]
             assert len(choice_columns) == 1
             df = df.rename({choice_columns[0]: "choice"})
             s = df["choice"]
@@ -75,9 +83,7 @@ def compute_stats(
                     v in question_choices
                 ), f"'{v}' not in choices: {', '.join(question_choices)}"
         case "multiple":
-            choice_columns = [
-                c for c in df.columns if c.startswith(f"q{i_question+1:02d}[")
-            ]
+            choice_columns = [c for c in df.columns if c.startswith(f"{question_id}[")]
             answers = (
                 df[choice_columns]
                 .unpivot()
@@ -110,9 +116,7 @@ def compute_stats(
             )
             answers = answers.with_columns(percentage=pl.col("count") / pl.col("total"))
         case "ranking":
-            choice_columns = [
-                c for c in df.columns if c.startswith(f"q{i_question+1:02d}[")
-            ]
+            choice_columns = [c for c in df.columns if c.startswith(f"{question_id}[")]
             answers = (
                 df[choice_columns]
                 .unpivot()
@@ -146,6 +150,11 @@ def compute_stats(
                 .group_by([pl.col("choice"), pl.col("variable")])
                 .agg(count=pl.sum("count"))
             )
+        case "text":
+            answers = pl.from_records(text_answers[question_id])
+            count_median = answers.select(pl.median("count")).to_series()[0]
+            limit = max(count_median, 10)
+            answers = answers.sort("count", descending=True).limit(limit)
         case _:
             raise NotImplementedError(
                 f"Not implemented for question type {question_type}"
@@ -218,6 +227,22 @@ def plot_answers(
             row = None
             bar_text_within = True
             chart_title += " (top 5 ranks, top 10 choices per rank)"
+        case "text":
+            # unfortunately, does not work for stacked charts
+            chart.data = chart.data.with_columns(
+                pl.col("choice").map_elements(
+                    lambda s: "\n".join(wrap(s, width=30)), return_dtype=pl.String
+                )
+            )
+            chart = chart.transform_calculate(choice="split(datum.choice, '\\n')")
+
+            chart = chart.encode(
+                y=y_sort(alt.Y("choice")).title("Choice"),
+                x=alt.X("count").title("Count"),
+                text=alt.Text("count:Q"),
+            )
+            bar_color = alt.Color("choice", legend=None, sort="-x")
+            row = None
         case _:
             raise NotImplementedError(
                 f"Not implemented for question type {question_type}: {question_prompt}"
@@ -248,15 +273,16 @@ def strip_prompt(prompt: str):
 
 
 def process_question(
-    survey: dict,
-    i_question: int,
+    question: dict,
     output_path: Path,
 ):
-    question = deepcopy(survey["questions"][i_question])
+    question = deepcopy(question)
+    question_id = question["id"]
+
     answers = compute_stats(
-        i_question=i_question,
         question=question,
         df=df,
+        text_answers=text_answers,
     )
     chart = plot_answers(
         question=question,
@@ -265,46 +291,38 @@ def process_question(
 
     output_path.mkdir(parents=True, exist_ok=True)
 
-    answers_path = output_path / f"answers_q{i_question+1:02}.json"
+    answers_path = output_path / f"answers_{question_id}.json"
     with open(answers_path, "w") as f:
         json.dump(obj=answers.to_dicts(), fp=f)
 
-    chart_plot_path = output_path / f"chart_plot_q{i_question+1:02}.png"
+    chart_plot_path = output_path / f"chart_plot_{question_id}.png"
     with open(chart_plot_path, "wb") as f:
         chart.save(fp=f, format="png", scale_factor=3)
 
-    chart_json_path = output_path / f"chart_json_q{i_question+1:02}.json"
+    chart_json_path = output_path / f"chart_json_{question_id}.json"
     with open(chart_json_path, "w") as f:
         chart.save(fp=f, format="json")
 
 
-# # helpful to debug
-# process_question(
-#     survey=survey,
-#     i_question=22,
-#     output_path=OUTPUT_PATH,
-# )
-# question = deepcopy(survey["questions"][22])
-# answers = compute_stats(
-#     i_question=22,
-#     question=question,
-#     df=df,
-# )
-# plot_answers(
-#     question=question,
-#     answers=answers,
-# )
+# helpful to debug
+question = deepcopy(survey["questions"][26])
+answers = compute_stats(
+    question=question,
+    df=df,
+    text_answers=text_answers,
+)
+plot_answers(
+    question=question,
+    answers=answers,
+)
 
 # %%
 # RUN ALL
-for i_question in range(len(survey["questions"])):
+for question in survey["questions"]:
     try:
         process_question(
-            survey=survey,
-            i_question=i_question,
+            question=question,
             output_path=OUTPUT_PATH,
         )
     except NotImplementedError as e:
-        print(f"i_question={i_question:02} error={e}")
-
-# %%
+        print(f"{question["id"]} error={e}")
