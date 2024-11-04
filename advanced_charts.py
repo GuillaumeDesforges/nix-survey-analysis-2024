@@ -333,3 +333,47 @@ for q_mc in multiple_choice_questions:
 
     save_output(code=f"{q_mc_id}_corrs", table=q_mc_corrs, chart=chart_q_mc)
 
+
+# %%
+# WIP
+multiple_choice_questions = [q for q in survey["questions"] if q["type"] == "multiple"]
+
+for q_mc in multiple_choice_questions:
+    q_mc_id = q_mc["id"]
+    q_mc_choices = q_mc["choices"]
+    q_mc_choices_cols = [f"{q_mc_id}[SQ{i+1:03}]" for i in range(len(q_mc_choices))]
+
+    q_mc_corrs = (
+        df.select(
+            pl.concat_list(
+                [
+                    pl.when(pl.col(c) == "Y")
+                    .then(pl.lit(t))
+                    .otherwise(pl.lit(None))
+                    .alias(c)
+                    for t, c in zip(q_mc_choices, q_mc_choices_cols)
+                ]
+            )
+            .list.drop_nulls()
+            .list.eval('"' + pl.element() + '"')
+            .list.join(",")
+            .alias("selected_choices")
+        )
+        .group_by("selected_choices")
+        .agg(pl.len().alias("count"))
+        .sort("count", descending=True)
+    )
+
+    q_mc_total = sum(q_mc_corrs["count"])
+    q_mc_threshold = q_mc_total * 0.10
+    q_mc_corrs = (
+        q_mc_corrs.with_columns(
+            selected_choices=pl.when(pl.col("count") >= 10)
+            .then("selected_choices")
+            .otherwise(pl.lit("other"))
+        )
+        .group_by("selected_choices")
+        .agg(pl.sum("count").alias("count"))
+    )
+
+    display(q_mc_corrs)
