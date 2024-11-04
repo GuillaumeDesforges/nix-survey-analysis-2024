@@ -5,6 +5,7 @@ pyright
 ruff
 # processing
 polars
+numpy
 # plot
 altair
 vl-convert-python

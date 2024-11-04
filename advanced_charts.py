@@ -7,11 +7,9 @@ import altair as alt
 import polars as pl
 from IPython.display import display
 
-# %%
 OUTPUT_PATH = Path("output/")
 
 
-# %%
 def _extract_question_choice_id(full_column_name: str) -> str | None:
     m = re.match(r"^(q[0-9]{2}(\[.*\])?)\..+", full_column_name)
     if m is None:
@@ -26,7 +24,7 @@ assert (
     )
     == "q12[SQ001]"
 )
-df = pl.read_csv("./data/results-survey2024.csv")
+df: pl.DataFrame = pl.read_csv("./data/results-survey2024.csv")
 original_columns = df.columns.copy()
 df = df.rename(
     {
@@ -35,7 +33,8 @@ df = df.rename(
         if (column_name := _extract_question_choice_id(full_column_name)) is not None
     }
 )
-df = df.with_columns(
+del _extract_question_choice_id
+df: pl.DataFrame = df.with_columns(
     pl.when(pl.col(pl.String).str.len_chars() == 0)
     .then(pl.lit("Not answered"))
     .otherwise(pl.col(pl.String))
@@ -43,10 +42,7 @@ df = df.with_columns(
 )
 df.head(3)
 
-del _extract_question_choice_id
 
-
-# %%
 with open("data/survey.json") as f:
     survey = json.load(f)
 
@@ -93,7 +89,6 @@ def get_choice_text(
 assert get_choice_text("q07[SQ003]") == "I use NixOS"
 
 
-# %%
 def save_output(
     table,
     chart,
@@ -115,7 +110,7 @@ def save_output(
         chart.save(fp=f, format="json")
 
 
-# +
+# %%
 q08_q07sq003 = df.group_by("q07[SQ003]", "q08").agg(pl.len().alias("count"))
 display(q08_q07sq003)
 
@@ -294,3 +289,47 @@ chart_q08_q18 = chart_q08_q18.encode(
 display(chart_q08_q18)
 
 save_output(code="q08_q18", table=q08_q18, chart=chart_q08_q18)
+
+# %%
+multiple_choice_questions = [q for q in survey["questions"] if q["type"] == "multiple"]
+
+for q_mc in multiple_choice_questions:
+    q_mc_id = q_mc["id"]
+    q_mc_prompt = q_mc["prompt"]
+    q_mc_choices = q_mc["choices"]
+    q_mc_choices_cols = [f"{q_mc_id}[SQ{i+1:03}]" for i in range(len(q_mc_choices))]
+
+    q_mc_corrs = (
+        (
+            df.select(
+                *(
+                    pl.when(pl.col(c) == "Y")
+                    .then(pl.lit(1))
+                    .otherwise(pl.lit(0))
+                    .alias(c)
+                    for c in q_mc_choices_cols
+                )
+            )
+            .corr()
+            .with_columns(choice1=pl.Series(q_mc_choices))
+        )
+        .rename({c: t for t, c in zip(q_mc_choices, q_mc_choices_cols)})
+        .unpivot(index="choice1", variable_name="choice2", value_name="corr")
+    )
+
+    chart_q_mc = (
+        alt.Chart(
+            q_mc_corrs,
+            title=f"{q_mc_prompt} - Correlation",
+        )
+        .encode(
+            x=alt.X("choice1", title="Choice"),
+            y=alt.Y("choice2", title="Choice"),
+            color=alt.Color("corr:Q", scale=alt.Scale(domain=[-1, 1])),
+        )
+        .mark_rect()
+    )
+    display(chart_q_mc)
+
+    save_output(code=f"{q_mc_id}_corrs", table=q_mc_corrs, chart=chart_q_mc)
+
